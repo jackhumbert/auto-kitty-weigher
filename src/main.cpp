@@ -1,62 +1,48 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <ESPDateTime.h>
+#include <HX711.h>
 
 #include "secrets.h"
 
 StaticJsonDocument<200> doc;
-WiFiClient client;
+WiFiClientSecure client;
+HX711 loadcell1;
+HX711 loadcell2;
 
 int status = WL_IDLE_STATUS;
 
 void updateJsonDoc(float weight) {
   doc.clear();
   JsonObject root = doc.to<JsonObject>();
-  JsonArray records = root.createNestedArray("records");
-  JsonObject record = records.createNestedObject();
-  JsonObject fields = record.createNestedObject("fields");
-  fields["Datetime"] = "2023-02-03T02:08:00.000Z";
+  JsonObject fields = root.createNestedObject("fields");
+  fields["Datetime"] = DateTime.toISOString();
   fields["Weight"] = weight;
 }
 
 void sendWeightData(float weight) {
   updateJsonDoc(weight);
   if (WiFi.status() == WL_CONNECTED) {
-    if (client.connect("api.airtable.com", 443)) {
-      client.println("POST /v0/" AIRTABLE_BASE " HTTP/1.1");
-      client.println("Host: api.airtable.com");
-      client.println("Authorization: Bearer " AIRTABLE_AUTH);
-      client.print("Content-Length: ");
-      client.println(measureJson(doc));
-      client.println("Content-Type: application/json");
-      client.println();
-      serializeJson(doc, client);
-      // client.println(postData.length());
-      // client.println();
-      // client.print(postData);
+    String json;
+    serializeJson(doc, json);
+    serializeJson(doc, Serial);
+    Serial.println();
 
-      // print json
-      // serializeJson(doc, Serial);
-      // Serial.println();
-
-      while (client.connected()) {
-        if (client.available()) {
-          char c = client.read();
-          Serial.write(c);
-        }
-      }
-      // if (!client.connected()) {
-      Serial.println();
-      Serial.println("Disconnecting from server...");
-      client.stop();
-      // }
-
-    } else {
-      Serial.println("Could not connect to server");
+    HTTPClient http;
+    http.begin("https://api.airtable.com/v0/" AIRTABLE_BASE, root_ca);
+    http.addHeader("Authorization", "Bearer " AIRTABLE_AUTH);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST(json);
+    Serial.print("HTTP Response code: ");
+    Serial.println(code);
+    if (code > 0) {
+      String payload = http.getString();
+      Serial.println(payload);
     }
-    // if (client.connected()) {
-    // client.stop();
-    // }
+    http.end();
+
   } else {
     Serial.println("WiFi not connected");
   }
@@ -64,11 +50,11 @@ void sendWeightData(float weight) {
 
 void setup() { 
   // delay(1000);
-  Serial.begin(115200);
-  // delay(10);
-  while (!Serial) {
-  ;
-  }
+  Serial.begin(9600);
+  delay(5000);
+  // while (!Serial) {
+  // ;
+  // }
 
   // We start by connecting to a WiFi network
 
@@ -86,18 +72,38 @@ void setup() {
 
   Serial.println("");
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+  
+  // setup datetime
+  DateTime.setTimeZone("CST-5");
+  // this method config ntp and wait for time sync
+  // default timeout is 10 seconds
+  DateTime.begin(/* timeout param */);
+  if (!DateTime.isTimeValid()) {
+    Serial.println("Failed to get time from server.");
+  }
+
+  loadcell1.begin(D1, D0);
+  loadcell2.begin(D3, D2);
+  // loadcell.set_scale();
+  // loadcell.set_offset(50682624);
+  // loadcell.tare();
 
   // if (WiFi.status()== WL_CONNECTED) {
   // Serial.println("connected to wifi");
-  sendWeightData(10.5);
+  // sendWeightData(10.5);
   // } else {
   // Serial.println("not connected to wifi");
   // }
+
   Serial.println("Setup done");
 }
+
 void loop() {
-  Serial.println("loop start");
-  delay(5000);
+  Serial.print("Weight: ");
+  Serial.print(loadcell1.read_average(20));
+  Serial.print(" & ");
+  Serial.println(loadcell2.read_average(20));
+  delay(1000);
 }

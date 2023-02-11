@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <ESPDateTime.h>
 #include <HX711.h>
+#include <queue>
 
 #include "secrets.h"
 
@@ -11,8 +12,15 @@ StaticJsonDocument<200> doc;
 WiFiClientSecure client;
 HX711 loadcell1;
 HX711 loadcell2;
+HX711 loadcell3;
+HX711 loadcell4;
 
 int status = WL_IDLE_STATUS;
+
+#define IDLE_THRESOLD 0.01
+#define CHANGING_THRESOLD 1.00
+#define MAX_HISTORY 8
+std::deque<float> history;
 
 void updateJsonDoc(float weight) {
   doc.clear();
@@ -56,6 +64,8 @@ void setup() {
   // ;
   // }
 
+  history = std::deque<float>();
+
   // We start by connecting to a WiFi network
 
   Serial.println();
@@ -84,8 +94,18 @@ void setup() {
     Serial.println("Failed to get time from server.");
   }
 
-  loadcell1.begin(D1, D0);
-  loadcell2.begin(D3, D2);
+  loadcell1.begin(D3, D4);
+  loadcell1.set_offset(177988);
+  loadcell1.set_scale(207413.581);
+  loadcell2.begin(D5, D6);
+  loadcell2.set_offset(551183);
+  loadcell2.set_scale(212627.8286);
+  loadcell3.begin(D7, D8);
+  loadcell3.set_offset(323836);
+  loadcell3.set_scale(215526.6095);
+  loadcell4.begin(D9, D10);
+  loadcell4.set_offset(136473);
+  loadcell4.set_scale(223576.2286);
   // loadcell.set_scale();
   // loadcell.set_offset(50682624);
   // loadcell.tare();
@@ -100,10 +120,60 @@ void setup() {
   Serial.println("Setup done");
 }
 
+#define AVERAGE 4
+
+enum ScaleState {
+  Idle = 0,
+  Changing = 1
+};
+
+ScaleState state = Idle;
+
 void loop() {
-  Serial.print("Weight: ");
-  Serial.print(loadcell1.read_average(20));
-  Serial.print(" & ");
-  Serial.println(loadcell2.read_average(20));
-  delay(1000);
+  float w1, w2, w3, w4;
+
+  for (int i = 0; i < AVERAGE; i++) {
+    w1 += loadcell1.get_units();
+    w2 += loadcell2.get_units();
+    w3 += loadcell3.get_units();
+    w4 += loadcell4.get_units();
+  }
+
+  w1 /= AVERAGE;
+  w2 /= AVERAGE;
+  w3 /= AVERAGE;
+  w4 /= AVERAGE;
+
+  float total = w1 + w2 + w3 + w4;
+
+  // see how read value compares to history
+  float avg_diff = 0;
+  float avg_perc = 0;
+  if (history.size() == MAX_HISTORY) {
+    for (int i = 0; i < MAX_HISTORY; i++) {
+      avg_diff += (total - history[i]) / MAX_HISTORY;
+      avg_perc += (total / history[i]) / MAX_HISTORY;
+    }
+  }
+
+  if (state == Changing && abs(avg_diff) < IDLE_THRESOLD) {
+    sendWeightData(total);
+    Serial.println("IDLE STATE");
+    state = Idle;
+  } else if (state == Idle && abs(avg_diff) > CHANGING_THRESOLD) {
+    Serial.println("CHANGING STATE");
+    state = Changing;
+  }
+
+  // add value to history
+  history.emplace_back(total);
+  while (history.size() > MAX_HISTORY) {
+    history.pop_front();
+  }
+
+  Serial.print(total, 3);
+  Serial.print(" : ");
+  Serial.print(avg_diff, 6);
+  Serial.print(" : ");
+  Serial.println(avg_perc, 6);
 }

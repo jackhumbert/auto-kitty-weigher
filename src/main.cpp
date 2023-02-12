@@ -22,16 +22,20 @@ int status = WL_IDLE_STATUS;
 #define MAX_HISTORY 8
 std::deque<float> history;
 
-void updateJsonDoc(float weight) {
+void updateJsonDoc(float weight, float r1, float r2, float r3, float r4) {
   doc.clear();
   JsonObject root = doc.to<JsonObject>();
   JsonObject fields = root.createNestedObject("fields");
   fields["Datetime"] = DateTime.toISOString();
   fields["Weight"] = weight;
+  fields["Raw 1"] = r1;
+  fields["Raw 2"] = r2;
+  fields["Raw 3"] = r3;
+  fields["Raw 4"] = r4;
 }
 
-void sendWeightData(float weight) {
-  updateJsonDoc(weight);
+void sendWeightData(float weight, float r1, float r2, float r3, float r4) {
+  updateJsonDoc(weight, r1, r2, r3, r4);
   if (WiFi.status() == WL_CONNECTED) {
     String json;
     serializeJson(doc, json);
@@ -131,18 +135,29 @@ ScaleState state = Idle;
 
 void loop() {
   float w1, w2, w3, w4;
+  float r1, r2, r3, r4;
 
   for (int i = 0; i < AVERAGE; i++) {
     w1 += loadcell1.get_units();
     w2 += loadcell2.get_units();
     w3 += loadcell3.get_units();
     w4 += loadcell4.get_units();
+
+    r1 += loadcell1.read();
+    r2 += loadcell2.read();
+    r3 += loadcell3.read();
+    r4 += loadcell4.read();
   }
 
   w1 /= AVERAGE;
   w2 /= AVERAGE;
   w3 /= AVERAGE;
   w4 /= AVERAGE;
+
+  r1 /= AVERAGE;
+  r2 /= AVERAGE;
+  r3 /= AVERAGE;
+  r4 /= AVERAGE;
 
   float total = w1 + w2 + w3 + w4;
 
@@ -157,7 +172,7 @@ void loop() {
   }
 
   if (state == Changing && abs(avg_diff) < IDLE_THRESOLD) {
-    sendWeightData(total);
+    sendWeightData(total, r1, r2, r3, r4);
     Serial.println("IDLE STATE");
     state = Idle;
   } else if (state == Idle && abs(avg_diff) > CHANGING_THRESOLD) {

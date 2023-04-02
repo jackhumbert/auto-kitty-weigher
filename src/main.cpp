@@ -3,9 +3,11 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <ESPDateTime.h>
+#include <DateTimeTZ.h>
 #include <HX711.h>
 #include <queue>
 #include <ResponsiveAnalogRead.h>
+#include <ESP_Google_Sheet_Client.h>
 
 #include "secrets.h"
 
@@ -41,38 +43,81 @@ void updateJsonDoc(float r1, float r2, float r3, float r4) {
   doc.clear();
   JsonObject root = doc.to<JsonObject>();
   JsonObject fields = root.createNestedObject("fields");
-  fields["Datetime"] = DateTime.toISOString();
+  JsonArray values = root.createNestedArray("values");
+  JsonArray values_array = values.createNestedArray();
+  values_array.add(DateTime.toISOString());
+  values_array.add(r1);
+  values_array.add(r2);
+  values_array.add(r3);
+  values_array.add(r4);
+  // fields["Datetime"] = DateTime.toISOString();
   // fields["Weight"] = weight;
-  fields["Raw 1"] = r1;
-  fields["Raw 2"] = r2;
-  fields["Raw 3"] = r3;
-  fields["Raw 4"] = r4;
+  // fields["Raw 1"] = r1;
+  // fields["Raw 2"] = r2;
+  // fields["Raw 3"] = r3;
+  // fields["Raw 4"] = r4;
 }
 
 void sendWeightData(float r1, float r2, float r3, float r4) {
-  updateJsonDoc(r1, r2, r3, r4);
+  // updateJsonDoc(r1, r2, r3, r4);
   if (WiFi.status() == WL_CONNECTED) {
-    String json;
-    serializeJson(doc, json);
-    serializeJson(doc, Serial);
-    Serial.println();
-
-    HTTPClient http;
-    http.begin("https://api.airtable.com/v0/" AIRTABLE_BASE, root_ca);
-    http.addHeader("Authorization", "Bearer " AIRTABLE_AUTH);
-    http.addHeader("Content-Type", "application/json");
-    int code = http.POST(json);
-    Serial.print("HTTP Response code: ");
-    Serial.println(code);
-    if (code > 0) {
-      String payload = http.getString();
-      Serial.println(payload);
+    Serial.print("Readying GSheets");
+    while (!GSheet.ready()) {
+      Serial.print(".");
     }
-    http.end();
+    Serial.println("");
+    FirebaseJson response;
+    FirebaseJson data;
+    data.add("values");
+    data.set("values/[0]/[0]", DateTime.format("%Y-%m-%d %H:%M:%S"));
+    char buffer[10];
+    sprintf(buffer, "%.2f", r1);
+    data.set("values/[0]/[1]", buffer);
+    sprintf(buffer, "%.2f", r2);
+    data.set("values/[0]/[2]", buffer);
+    sprintf(buffer, "%.2f", r3);
+    data.set("values/[0]/[3]", buffer);
+    sprintf(buffer, "%.2f", r4);
+    data.set("values/[0]/[4]", buffer);
+    data.toString(Serial, true);
+    // bool success = GSheet.values.get(&response, "1o4j6W-qBNH-4BgIbn9iTBa7n-K6YHjyUozrD8Kfawug", "Data!B1:B1");
+    GSheet.values.append(&response, "1o4j6W-qBNH-4BgIbn9iTBa7n-K6YHjyUozrD8Kfawug", "Data!A2:E2", &data, "USER_ENTERED", "OVERWRITE", "true", "FORMATTED_VALUE", "SERIAL_NUMBER");
+    response.toString(Serial, true);
+    
+    // String json;
+    // serializeJson(doc, json);
+    // serializeJson(doc, Serial);
+    // Serial.println();
+
+    // HTTPClient http;
+    // http.begin("https://api.airtable.com/v0/" AIRTABLE_BASE, root_ca);
+    // http.addHeader("Authorization", "Bearer " AIRTABLE_AUTH);
+    // http.addHeader("Content-Type", "application/json");
+    // int code = http.POST(json);
+    // Serial.print("HTTP Response code: ");
+    // Serial.println(code);
+    // if (code > 0) {
+    //   String payload = http.getString();
+    //   Serial.println(payload);
+    // }
+    // http.end();
 
   } else {
     Serial.println("WiFi not connected");
   }
+}
+
+void tokenStatusCallback(TokenInfo info)
+{
+    if (info.status == esp_signer_token_status_error)
+    {
+        Serial.printf("Token info: type = %s, status = %s\n", GSheet.getTokenType(info).c_str(), GSheet.getTokenStatus(info).c_str());
+        Serial.printf("Token error: %s\n", GSheet.getTokenError(info).c_str());
+    }
+    else
+    {
+        Serial.printf("Token info: type = %s, status = %s\n", GSheet.getTokenType(info).c_str(), GSheet.getTokenStatus(info).c_str());
+    }
 }
 
 void setup() { 
@@ -118,7 +163,7 @@ void setup() {
   Serial.println(WiFi.localIP());
   
   // setup datetime
-  DateTime.setTimeZone("CST-5");
+  DateTime.setTimeZone(TZ_America_Indiana_Indianapolis);
   // this method config ntp and wait for time sync
   // default timeout is 10 seconds
   DateTime.begin(/* timeout param */);
@@ -127,20 +172,17 @@ void setup() {
   }
 
   loadcell1.begin(D3, D4);
-  // loadcell1.set_offset(177988);
-  // loadcell1.set_scale(207413.581);
+  loadcell1.set_offset(179246);
+  loadcell1.set_scale(198126.5595);
   loadcell2.begin(D5, D6);
-  // loadcell2.set_offset(551183);
-  // loadcell2.set_scale(212627.8286);
+  loadcell2.set_offset(632649);
+  loadcell2.set_scale(210156.3237);
   loadcell3.begin(D7, D8);
-  // loadcell3.set_offset(323836);
-  // loadcell3.set_scale(215526.6095);
+  loadcell3.set_offset(333111);
+  loadcell3.set_scale(211612.6061);
   loadcell4.begin(D9, D10);
-  // loadcell4.set_offset(136473);
-  // loadcell4.set_scale(223576.2286);
-  // loadcell.set_scale();
-  // loadcell.set_offset(50682624);
-  // loadcell.tare();
+  loadcell4.set_offset(188310);
+  loadcell4.set_scale(230208.1782);
 
   // if (WiFi.status()== WL_CONNECTED) {
   // Serial.println("connected to wifi");
@@ -148,6 +190,11 @@ void setup() {
   // } else {
   // Serial.println("not connected to wifi");
   // }
+
+  // GSheet.setTokenCallback(tokenStatusCallback);
+
+  //Begin the access token generation for Google API authentication
+  GSheet.begin(CLIENT_EMAIL, PROJECT_ID, PRIVATE_KEY);
 
   Serial.println("Setup done");
 }
